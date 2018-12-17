@@ -9,19 +9,6 @@ const request = require('request');
 const app = express();
 const uuid = require('uuid');
 
-const broadcast = require('./routes/broadcast');
-const webviews = require('./routes/webviews');
-
-const userService = require('./services/user-service');
-const colors = require('./colors');
-const weatherService = require('./services/weather-service');
-const jobApplicationService = require('./services/job-application-service');
-let dialogflowService = require('./services/dialogflow-service');
-const fbService = require('./services/fb-service');
-
-const passport = require('passport');
-const FacebookStrategy = require('passport-facebook').Strategy;
-const session = require('express-session');
 
 // Messenger API parameters
 if (!config.FB_PAGE_TOKEN) {
