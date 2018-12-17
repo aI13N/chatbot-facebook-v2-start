@@ -8,8 +8,6 @@ const bodyParser = require('body-parser');
 const request = require('request');
 const app = express();
 const uuid = require('uuid');
-//const pg = require('pg');
-//pg.defaults.ssl = true;
 
 const broadcast = require('./routes/broadcast');
 const webviews = require('./routes/webviews');
@@ -62,18 +60,7 @@ if (!config.EMAIL_TO) { //sending email
 if (!config.WEATHER_API_KEY) { //weather api key
     throw new Error('missing WEATHER_API_KEY');
 }
-if (!config.PG_CONFIG) { //pg config
-    throw new Error('missing PG_CONFIG');
-}
-if (!config.FB_APP_ID) { //app id
-    throw new Error('missing FB_APP_ID');
-}
-if (!config.ADMIN_ID) { //admin id for login
-    throw new Error('missing ADMIN_ID');
-}
-if (!config.FB_PAGE_INBOX_ID) { //page inbox id - the receiver app
-    throw new Error('missing FB_PAGE_INBOX_ID');
-}
+
 
 app.set('port', (process.env.PORT || 5000))
 
