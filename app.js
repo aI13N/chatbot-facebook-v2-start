@@ -211,7 +211,7 @@ function handleEcho(messageId, appId, metadata) {
 function handleDialogFlowAction(sender, action, messages, contexts, parameters) {
     switch (action) {
         case "detailed_order":
-          res.send('Connected')
+          
             if (fbService.isDefined(contexts[0]) &&
                 (contexts[0].name.includes('order_details ') || contexts[0].name.includes('order_details_dialog_context'))
                 && contexts[0].parameters) {
@@ -237,7 +237,8 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
                     }
             }
             break;
-        default:
+
+          default:
             //unhandled action, just send back the text
             handleMessages(messages, sender);
     }
