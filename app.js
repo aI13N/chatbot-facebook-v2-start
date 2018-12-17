@@ -50,7 +50,7 @@ app.set('port', (process.env.PORT || 5000))
 
 //verify request came from facebook
 app.use(bodyParser.json({
-    verify: fbService.verifyRequestSignature
+    verify: verifyRequestSignature
 }));
 
 //serve static files in the public directory
@@ -65,47 +65,7 @@ app.use(bodyParser.urlencoded({
 app.use(bodyParser.json());
 
 
-app.use(session(
-    {
-        secret: 'keyboard cat',
-        resave: true,
-        saveUninitilized: true
-    }
-));
 
-
-app.use(passport.initialize());
-app.use(passport.session());
-
-passport.serializeUser(function(profile, cb) {
-    cb(null, profile);
-});
-
-passport.deserializeUser(function(profile, cb) {
-    cb(null, profile);
-});
-
-passport.use(new FacebookStrategy({
-        clientID: config.FB_APP_ID,
-        clientSecret: config.FB_APP_SECRET,
-        callbackURL: config.SERVER_URL + "auth/facebook/callback"
-    },
-    function(accessToken, refreshToken, profile, cb) {
-        process.nextTick(function() {
-            return cb(null, profile);
-        });
-    }
-));
-
-app.get('/auth/facebook', passport.authenticate('facebook',{scope:'public_profile'}));
-
-
-app.get('/auth/facebook/callback',
-    passport.authenticate('facebook', { successRedirect : '/broadcast/broadcast', failureRedirect: '/broadcast' }));
-
-
-
-app.set('view engine', 'ejs');
 
 
 
@@ -123,17 +83,11 @@ const sessionClient = new dialogflow.SessionsClient(
 
 
 const sessionIds = new Map();
-const usersMap = new Map();
 
 // Index route
 app.get('/', function (req, res) {
     res.send('Hello world, I am a chat bot')
 })
-
-app.use('/broadcast', broadcast);
-app.use('/webviews', webviews);
-
-
 
 // for Facebook verification
 app.get('/webhook/', function (req, res) {
@@ -165,40 +119,24 @@ app.post('/webhook/', function (req, res) {
             var pageID = pageEntry.id;
             var timeOfEvent = pageEntry.time;
 
-            // Secondary Receiver is in control - listen on standby channel
-            if (pageEntry.standby) {
-                // iterate webhook events from standby channel
-                pageEntry.standby.forEach(event => {
-                    const psid = event.sender.id;
-                    const message = event.message;
-                    console.log('message from: ', psid);
-                    console.log('message to inbox: ', message);
-                });
-            }
-
-            // Bot is in control - listen for messages
-            if (pageEntry.messaging) {
-                // Iterate over each messaging event
-                pageEntry.messaging.forEach(function (messagingEvent) {
-                    if (messagingEvent.optin) {
-                        fbService.receivedAuthentication(messagingEvent);
-                    } else if (messagingEvent.message) {
-                        receivedMessage(messagingEvent);
-                    } else if (messagingEvent.delivery) {
-                        fbService.receivedDeliveryConfirmation(messagingEvent);
-                    } else if (messagingEvent.postback) {
-                        receivedPostback(messagingEvent);
-                    } else if (messagingEvent.read) {
-                        fbService.receivedMessageRead(messagingEvent);
-                    } else if (messagingEvent.account_linking) {
-                        fbService.receivedAccountLink(messagingEvent);
-                    } else if (messagingEvent.pass_thread_control) {
-                        // do something with the metadata: messagingEvent.pass_thread_control.metadata
-                    } else {
-                        console.log("Webhook received unknown messagingEvent: ", messagingEvent);
-                    }
-                });
-            }
+            // Iterate over each messaging event
+            pageEntry.messaging.forEach(function (messagingEvent) {
+                if (messagingEvent.optin) {
+                    receivedAuthentication(messagingEvent);
+                } else if (messagingEvent.message) {
+                    receivedMessage(messagingEvent);
+                } else if (messagingEvent.delivery) {
+                    receivedDeliveryConfirmation(messagingEvent);
+                } else if (messagingEvent.postback) {
+                    receivedPostback(messagingEvent);
+                } else if (messagingEvent.read) {
+                    receivedMessageRead(messagingEvent);
+                } else if (messagingEvent.account_linking) {
+                    receivedAccountLink(messagingEvent);
+                } else {
+                    console.log("Webhook received unknown messagingEvent: ", messagingEvent);
+                }
+            });
         });
 
         // Assume all went well.
@@ -208,17 +146,7 @@ app.post('/webhook/', function (req, res) {
 });
 
 
-function setSessionAndUser(senderID) {
-    if (!sessionIds.has(senderID)) {
-        sessionIds.set(senderID, uuid.v1());
-    }
 
-    if (!usersMap.has(senderID)) {
-        userService.addUser(function(user){
-            usersMap.set(senderID, user);
-        }, senderID);
-    }
-}
 
 
 function receivedMessage(event) {
@@ -228,8 +156,9 @@ function receivedMessage(event) {
     var timeOfMessage = event.timestamp;
     var message = event.message;
 
-    setSessionAndUser(senderID);
-
+    if (!sessionIds.has(senderID)) {
+        sessionIds.set(senderID, uuid.v1());
+    }
     //console.log("Received message for user %d and page %d at %d with message:", senderID, recipientID, timeOfMessage);
     //console.log(JSON.stringify(message));
 
@@ -244,7 +173,7 @@ function receivedMessage(event) {
     var quickReply = message.quick_reply;
 
     if (isEcho) {
-        fbService.handleEcho(messageId, appId, metadata);
+        handleEcho(messageId, appId, metadata);
         return;
     } else if (quickReply) {
         handleQuickReply(senderID, quickReply, messageId);
@@ -253,96 +182,34 @@ function receivedMessage(event) {
 
 
     if (messageText) {
-        //send message to DialogFlow
-        dialogflowService.sendTextQueryToDialogFlow(sessionIds, handleDialogFlowResponse, senderID, messageText);
+        //send message to api.ai
+        sendToDialogFlow(senderID, messageText);
     } else if (messageAttachments) {
-        fbService.handleMessageAttachments(messageAttachments, senderID);
+        handleMessageAttachments(messageAttachments, senderID);
     }
 }
 
+
+function handleMessageAttachments(messageAttachments, senderID){
+    //for now just reply
+    sendTextMessage(senderID, "Attachment received. Thank you.");   
+}
 
 function handleQuickReply(senderID, quickReply, messageId) {
     var quickReplyPayload = quickReply.payload;
-    switch (quickReplyPayload) {
-        case "LIVE_AGENT":
-            fbService.sendPassThread(senderID);
-            break;
-        case 'NEWS_PER_WEEK':
-            userService.newsletterSettings(function (updated) {
-                if (updated) {
-                    fbService.sendTextMessage(senderID, "Thank you for subscribing!" +
-                        "If you want to usubscribe just write 'unsubscribe from newsletter'");
-                } else {
-                    fbService.sendTextMessage(senderID, "Newsletter is not available at this moment." +
-                        "Try again later!");
-                }
-            }, 1, senderID);
-            break;
-        case 'NEWS_PER_DAY':
-            userService.newsletterSettings(function (updated) {
-                if (updated) {
-                    fbService.sendTextMessage(senderID, "Thank you for subscribing!" +
-                        "If you want to usubscribe just write 'unsubscribe from newsletter'");
-                } else {
-                    fbService.sendTextMessage(senderID, "Newsletter is not available at this moment." +
-                        "Try again later!");
-                }
-            }, 2, senderID);
-            break;
-        default:
-            dialogflowService.sendTextQueryToDialogFlow(sessionIds, handleDialogFlowResponse, senderID, quickReplyPayload);
-            break;
-    }
+    console.log("Quick reply for message %s with payload %s", messageId, quickReplyPayload);
+    //send payload to api.ai
+    sendToDialogFlow(senderID, quickReplyPayload);
 }
 
+//https://developers.facebook.com/docs/messenger-platform/webhook-reference/message-echo
+function handleEcho(messageId, appId, metadata) {
+    // Just logging message echoes to console
+    console.log("Received echo for message %s and app %d with metadata %s", messageId, appId, metadata);
+}
 
 function handleDialogFlowAction(sender, action, messages, contexts, parameters) {
     switch (action) {
-        case "input.unknown":
-            fbService.handleMessages(messages, sender);
-            
-            fbService.sendTypingOn(sender);
-
-            //ask what user wants to do next
-            setTimeout(function() {
-                let responseText = "Can you please re-phrase your question, or click the button to talk to a live agent. " +
-                    "I'm just an automated chat bot.";
-
-                let replies = [
-                    {
-                        "content_type": "text",
-                        "title": "Live agent",
-                        "payload": "LIVE_AGENT"
-                    }
-                ];
-
-                fbService.sendQuickReply(sender, responseText, replies);
-            }, 2000);
-
-            break;
-        case "talk.human":
-            fbService.sendPassThread(sender);
-            break;
-               
-        case "get-current-weather":
-            if ( parameters.fields['geo-city'].stringValue!='') {
-
-                weatherService(function(weatherResponse){
-                    if (!weatherResponse) {
-                        fbService.sendTextMessage(sender,
-                            `No weather forecast available for ${parameters.fields['geo-city'].stringValue}`);
-                    } else {
-                        let reply = `${messages[0].text.text} ${weatherResponse}`;
-                        fbService.sendTextMessage(sender, reply);
-                    }
-
-
-                }, parameters.fields['geo-city'].stringValue);
-            } else {
-                fbService.sendTextMessage(sender, 'No weather forecast available');
-            }
-            break;
-        
         case "detailed_order":
             if (fbService.isDefined(contexts[0]) &&
                 (contexts[0].name.includes('order_details ') || contexts[0].name.includes('order_details_dialog_context'))
@@ -371,8 +238,74 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
             break;
         default:
             //unhandled action, just send back the text
-            fbService.handleMessages(messages, sender);
+            handleMessages(messages, sender);
     }
+}
+
+function handleMessage(message, sender) {
+    switch (message.message) {
+        case "text": //text
+            message.text.text.forEach((text) => {
+                if (text !== '') {
+                    sendTextMessage(sender, text);
+                }
+            });
+            break;
+        case "quickReplies": //quick replies
+            let replies = [];
+            message.quickReplies.quickReplies.forEach((text) => {
+                let reply =
+                    {
+                        "content_type": "text",
+                        "title": text,
+                        "payload": text
+                    }
+                replies.push(reply);
+            });
+            sendQuickReply(sender, message.quickReplies.title, replies);
+            break;
+        case "image": //image
+            sendImageMessage(sender, message.image.imageUri);
+            break;
+    }
+}
+
+
+function handleCardMessages(messages, sender) {
+
+    let elements = [];
+    for (var m = 0; m < messages.length; m++) {
+        let message = messages[m];
+        let buttons = [];
+        for (var b = 0; b < message.card.buttons.length; b++) {
+            let isLink = (message.card.buttons[b].postback.substring(0, 4) === 'http');
+            let button;
+            if (isLink) {
+                button = {
+                    "type": "web_url",
+                    "title": message.card.buttons[b].text,
+                    "url": message.card.buttons[b].postback
+                }
+            } else {
+                button = {
+                    "type": "postback",
+                    "title": message.card.buttons[b].text,
+                    "payload": message.card.buttons[b].postback
+                }
+            }
+            buttons.push(button);
+        }
+
+
+        let element = {
+            "title": message.card.title,
+            "image_url":message.card.imageUri,
+            "subtitle": message.card.subtitle,
+            "buttons": buttons
+        };
+        elements.push(element);
+    }
+    sendGenericMessage(sender, elements);
 }
 
 
@@ -415,68 +348,352 @@ function handleDialogFlowResponse(sender, response) {
     let contexts = response.outputContexts;
     let parameters = response.parameters;
 
-    fbService.sendTypingOff(sender);
+    sendTypingOff(sender);
 
-    if (fbService.isDefined(action)) {
+    if (isDefined(action)) {
         handleDialogFlowAction(sender, action, messages, contexts, parameters);
-    } else if (fbService.isDefined(messages)) {
-        fbService.handleMessages(messages, sender);
-    } else if (responseText == '' && !fbService.isDefined(action)) {
+    } else if (isDefined(messages)) {
+        handleMessages(messages, sender);
+    } else if (responseText == '' && !isDefined(action)) {
         //dialogflow could not evaluate input.
-        fbService.sendTextMessage(sender, "I'm not sure what you want. Can you be more specific?");
-    } else if (fbService.isDefined(responseText)) {
-        fbService.sendTextMessage(sender, responseText);
+        sendTextMessage(sender, "I'm not sure what you want. Can you be more specific?");
+    } else if (isDefined(responseText)) {
+        sendTextMessage(sender, responseText);
     }
 }
 
+async function sendToDialogFlow(sender, textString, params) {
 
-async function resolveAfterXSeconds(x) {
-    return new Promise(resolve => {
-        setTimeout(() => {
-            resolve(x);
-        }, x * 1000);
-    });
+    sendTypingOn(sender);
+
+    try {
+        const sessionPath = sessionClient.sessionPath(
+            config.GOOGLE_PROJECT_ID,
+            sessionIds.get(sender)
+        );
+
+        const request = {
+            session: sessionPath,
+            queryInput: {
+                text: {
+                    text: textString,
+                    languageCode: config.DF_LANGUAGE_CODE,
+                },
+            },
+            queryParams: {
+                payload: {
+                    data: params
+                }
+            }
+        };
+        const responses = await sessionClient.detectIntent(request);
+
+        const result = responses[0].queryResult;
+        handleDialogFlowResponse(sender, result);
+    } catch (e) {
+        console.log('error');
+        console.log(e);
+    }
+
 }
 
 
-async function greetUserText(userId) {
-    let user = usersMap.get(userId);
-    if (!user) {
-        await resolveAfterXSeconds(2);
-        user = usersMap.get(userId);
-    }
-
-    if (user) {
-        sendTextMessage(userId, "Welcome " + user.first_name + '! ' +
-            'I can answer frequently asked questions for you ' +
-            'and I perform job interviews. What can I help you with?');
-    } else {
-        sendTextMessage(userId, 'Welcome! ' +
-            'I can answer frequently asked questions for you ' +
-            'and I perform job interviews. What can I help you with?');
-    }
-}
 
 
-
-function sendFunNewsSubscribe(userId) {
-    let responceText = "I can send you latest fun technology news, " +
-        "you'll be on top of things and you'll get some laughts. How often would you like to receive them?";
-
-    let replies = [
-        {
-            "content_type": "text",
-            "title": "Once per week",
-            "payload": "NEWS_PER_WEEK"
+function sendTextMessage(recipientId, text) {
+    var messageData = {
+        recipient: {
+            id: recipientId
         },
-        {
-            "content_type": "text",
-            "title": "Once per day",
-            "payload": "NEWS_PER_DAY"
+        message: {
+            text: text
         }
-    ];
+    }
+    callSendAPI(messageData);
+}
 
-    fbService.sendQuickReply(userId, responceText, replies);
+/*
+ * Send an image using the Send API.
+ *
+ */
+function sendImageMessage(recipientId, imageUrl) {
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        message: {
+            attachment: {
+                type: "image",
+                payload: {
+                    url: imageUrl
+                }
+            }
+        }
+    };
+
+    callSendAPI(messageData);
+}
+
+/*
+ * Send a Gif using the Send API.
+ *
+ */
+function sendGifMessage(recipientId) {
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        message: {
+            attachment: {
+                type: "image",
+                payload: {
+                    url: config.SERVER_URL + "/assets/instagram_logo.gif"
+                }
+            }
+        }
+    };
+
+    callSendAPI(messageData);
+}
+
+/*
+ * Send audio using the Send API.
+ *
+ */
+function sendAudioMessage(recipientId) {
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        message: {
+            attachment: {
+                type: "audio",
+                payload: {
+                    url: config.SERVER_URL + "/assets/sample.mp3"
+                }
+            }
+        }
+    };
+
+    callSendAPI(messageData);
+}
+
+/*
+ * Send a video using the Send API.
+ * example videoName: "/assets/allofus480.mov"
+ */
+function sendVideoMessage(recipientId, videoName) {
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        message: {
+            attachment: {
+                type: "video",
+                payload: {
+                    url: config.SERVER_URL + videoName
+                }
+            }
+        }
+    };
+
+    callSendAPI(messageData);
+}
+
+/*
+ * Send a video using the Send API.
+ * example fileName: fileName"/assets/test.txt"
+ */
+function sendFileMessage(recipientId, fileName) {
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        message: {
+            attachment: {
+                type: "file",
+                payload: {
+                    url: config.SERVER_URL + fileName
+                }
+            }
+        }
+    };
+
+    callSendAPI(messageData);
+}
+
+
+
+/*
+ * Send a button message using the Send API.
+ *
+ */
+function sendButtonMessage(recipientId, text, buttons) {
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        message: {
+            attachment: {
+                type: "template",
+                payload: {
+                    template_type: "button",
+                    text: text,
+                    buttons: buttons
+                }
+            }
+        }
+    };
+
+    callSendAPI(messageData);
+}
+
+
+function sendGenericMessage(recipientId, elements) {
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        message: {
+            attachment: {
+                type: "template",
+                payload: {
+                    template_type: "generic",
+                    elements: elements
+                }
+            }
+        }
+    };
+
+    callSendAPI(messageData);
+}
+
+
+function sendReceiptMessage(recipientId, recipient_name, currency, payment_method,
+                            timestamp, elements, address, summary, adjustments) {
+    // Generate a random receipt ID as the API requires a unique ID
+    var receiptId = "order" + Math.floor(Math.random() * 1000);
+
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        message: {
+            attachment: {
+                type: "template",
+                payload: {
+                    template_type: "receipt",
+                    recipient_name: recipient_name,
+                    order_number: receiptId,
+                    currency: currency,
+                    payment_method: payment_method,
+                    timestamp: timestamp,
+                    elements: elements,
+                    address: address,
+                    summary: summary,
+                    adjustments: adjustments
+                }
+            }
+        }
+    };
+
+    callSendAPI(messageData);
+}
+
+/*
+ * Send a message with Quick Reply buttons.
+ *
+ */
+function sendQuickReply(recipientId, text, replies, metadata) {
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        message: {
+            text: text,
+            metadata: isDefined(metadata)?metadata:'',
+            quick_replies: replies
+        }
+    };
+
+    callSendAPI(messageData);
+}
+
+/*
+ * Send a read receipt to indicate the message has been read
+ *
+ */
+function sendReadReceipt(recipientId) {
+
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        sender_action: "mark_seen"
+    };
+
+    callSendAPI(messageData);
+}
+
+/*
+ * Turn typing indicator on
+ *
+ */
+function sendTypingOn(recipientId) {
+
+
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        sender_action: "typing_on"
+    };
+
+    callSendAPI(messageData);
+}
+
+/*
+ * Turn typing indicator off
+ *
+ */
+function sendTypingOff(recipientId) {
+
+
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        sender_action: "typing_off"
+    };
+
+    callSendAPI(messageData);
+}
+
+/*
+ * Send a message with the account linking call-to-action
+ *
+ */
+function sendAccountLinking(recipientId) {
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        message: {
+            attachment: {
+                type: "template",
+                payload: {
+                    template_type: "button",
+                    text: "Welcome. Link your account.",
+                    buttons: [{
+                        type: "account_link",
+                        url: config.SERVER_URL + "/authorize"
+          }]
+                }
+            }
+        }
+    };
+
+    callSendAPI(messageData);
 }
 
 /*
@@ -512,6 +729,7 @@ function callSendAPI(messageData) {
 }
 
 
+
 /*
  * Postback Event
  *
@@ -524,30 +742,14 @@ function receivedPostback(event) {
     var recipientID = event.recipient.id;
     var timeOfPostback = event.timestamp;
 
-    setSessionAndUser(senderID);
-
     // The 'payload' param is a developer-defined field which is set in a postback 
     // button for Structured Messages. 
     var payload = event.postback.payload;
 
     switch (payload) {
-        case 'FUN_NEWS':
-            sendFunNewsSubscribe(senderID);
-            break;
-        case 'GET_STARTED':
-            greetUserText(senderID);
-            break;
-        case 'JOB_APPLY':
-            //get feedback with new jobs
-            dialogflowService.sendEventToDialogFlow(sessionIds, handleDialogFlowResponse, senderID, 'JOB_OPENINGS');
-            break;
-        case 'CHAT':
-            //user wants to chat
-            fbService.sendTextMessage(senderID, "I love chatting too. Do you have any other questions for me?");
-            break;
         default:
             //unindentified payload
-            fbService.sendTextMessage(senderID, "I'm not sure what you want. Can you be more specific?");
+            sendTextMessage(senderID, "I'm not sure what you want. Can you be more specific?");
             break;
 
     }
@@ -556,7 +758,6 @@ function receivedPostback(event) {
         "at %d", senderID, recipientID, payload, timeOfPostback);
 
 }
-
 
 
 /*
