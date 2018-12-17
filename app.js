@@ -8,8 +8,8 @@ const bodyParser = require('body-parser');
 const request = require('request');
 const app = express();
 const uuid = require('uuid');
-
-pg.defaults.ssl = true;
+//const pg = require('pg');
+//pg.defaults.ssl = true;
 
 const broadcast = require('./routes/broadcast');
 const webviews = require('./routes/webviews');
