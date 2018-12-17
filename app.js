@@ -211,6 +211,7 @@ function handleEcho(messageId, appId, metadata) {
 function handleDialogFlowAction(sender, action, messages, contexts, parameters) {
     switch (action) {
         case "detailed_order":
+          res.send('Connected')
             if (fbService.isDefined(contexts[0]) &&
                 (contexts[0].name.includes('order_details ') || contexts[0].name.includes('order_details_dialog_context'))
                 && contexts[0].parameters) {
@@ -221,7 +222,7 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
                 let client_address = (fbService.isDefined(contexts[0].parameters.fields.client_address)
                     && contexts[0].parameters.fields.client_client_address != '') ? contexts[0].parameters.fields.client_address.stringValue : '';
                 
-
+                res.send('A new order from' + client_name)    
                 if (client_contact_number != '' && client_name != '' && client_address != '') {
 
                      let emailContent = 'A new order from ' + client_name + 
