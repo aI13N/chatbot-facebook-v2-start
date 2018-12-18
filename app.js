@@ -35,15 +35,7 @@ if (!config.FB_APP_SECRET) {
 if (!config.SERVER_URL) { //used for ink to static files
     throw new Error('missing SERVER_URL');
 }
-if (!config.SENDGRID_API_KEY) { //sending email
-    throw new Error('missing SENDGRID_API_KEY');
-}
-if (!config.EMAIL_FROM) { //sending email
-    throw new Error('missing EMAIL_FROM');
-}
-if (!config.EMAIL_TO) { //sending email
-    throw new Error('missing EMAIL_TO');
-}
+
 
 
 app.set('port', (process.env.PORT || 5000))
@@ -111,6 +103,8 @@ app.post('/webhook/', function (req, res) {
     var data = req.body;
     console.log(JSON.stringify(data));
 
+
+
     // Make sure this is a page subscription
     if (data.object == 'page') {
         // Iterate over each entry
@@ -159,8 +153,8 @@ function receivedMessage(event) {
     if (!sessionIds.has(senderID)) {
         sessionIds.set(senderID, uuid.v1());
     }
-    console.log("Received message for user %d and page %d at %d with message:", senderID, recipientID, timeOfMessage);
-    console.log(JSON.stringify(message));
+    //console.log("Received message for user %d and page %d at %d with message:", senderID, recipientID, timeOfMessage);
+    //console.log(JSON.stringify(message));
 
     var isEcho = message.is_echo;
     var messageId = message.mid;
@@ -192,7 +186,7 @@ function receivedMessage(event) {
 
 function handleMessageAttachments(messageAttachments, senderID){
     //for now just reply
-    sendTextMessage(senderID, "Attachment received. Thank you.");   
+    sendTextMessage(senderID, "Attachment received. Thank you.");
 }
 
 function handleQuickReply(senderID, quickReply, messageId) {
@@ -210,35 +204,7 @@ function handleEcho(messageId, appId, metadata) {
 
 function handleDialogFlowAction(sender, action, messages, contexts, parameters) {
     switch (action) {
-        case "detailed_order":
-          
-            if (fbService.isDefined(contexts[0]) &&
-                (contexts[0].name.includes('order_details ') || contexts[0].name.includes('order_details_dialog_context'))
-                && contexts[0].parameters) {
-                let client_contact_number = (fbService.isDefined(contexts[0].parameters.fields.client_contact_number)
-                    && contexts[0].parameters.fields.client_contact_number != '') ? contexts[0].parameters.fields.client_contact_number.stringValue : '';
-                let client_name = (fbService.isDefined(contexts[0].parameters.fields.client_name)
-                    && contexts[0].parameters.fields.client_client_name != '') ? contexts[0].parameters.fields.client_name.stringValue : '';
-                let client_address = (fbService.isDefined(contexts[0].parameters.fields.client_address)
-                    && contexts[0].parameters.fields.client_client_address != '') ? contexts[0].parameters.fields.client_address.stringValue : '';
-                
-                res.send('A new order from' + client_name)    
-                if (client_contact_number != '' && client_name != '' && client_address != '') {
-
-                     let emailContent = 'A new order from ' + client_name + 
-                        '.<br> Contact Number: ' + client_contact_number + '.' +
-                        '.<br> Delivery Address: ' + client_address + '.';
-
-                    sendEmail('New Order', emailContent);
-
-                    handleMessages(messages, sender);
-                    } else {
-                    handleMessages(messages, sender);
-                    }
-            }
-            break;
-
-          default:
+        default:
             //unhandled action, just send back the text
             handleMessages(messages, sender);
     }
@@ -358,7 +324,7 @@ function handleDialogFlowResponse(sender, response) {
         handleMessages(messages, sender);
     } else if (responseText == '' && !isDefined(action)) {
         //dialogflow could not evaluate input.
-        sendTextMessage(sender, "Sent to DialogFlow. I'm not sure what you want. Can you be more specific?");
+        sendTextMessage(sender, "I'm not sure what you want. Can you be more specific?");
     } else if (isDefined(responseText)) {
         sendTextMessage(sender, responseText);
     }
@@ -689,7 +655,7 @@ function sendAccountLinking(recipientId) {
                     buttons: [{
                         type: "account_link",
                         url: config.SERVER_URL + "/authorize"
-          }]
+                    }]
                 }
             }
         }
@@ -699,8 +665,8 @@ function sendAccountLinking(recipientId) {
 }
 
 /*
- * Call the Send API. The message data goes in the body. If successful, we'll 
- * get the message id in a response 
+ * Call the Send API. The message data goes in the body. If successful, we'll
+ * get the message id in a response
  *
  */
 function callSendAPI(messageData) {
@@ -744,14 +710,14 @@ function receivedPostback(event) {
     var recipientID = event.recipient.id;
     var timeOfPostback = event.timestamp;
 
-    // The 'payload' param is a developer-defined field which is set in a postback 
-    // button for Structured Messages. 
+    // The 'payload' param is a developer-defined field which is set in a postback
+    // button for Structured Messages.
     var payload = event.postback.payload;
 
     switch (payload) {
         default:
             //unindentified payload
-            sendTextMessage(senderID, "Received postback. I'm not sure what you want. Can you be more specific?");
+            sendTextMessage(senderID, "I'm not sure what you want. Can you be more specific?");
             break;
 
     }
@@ -839,9 +805,9 @@ function receivedAuthentication(event) {
     var timeOfAuth = event.timestamp;
 
     // The 'ref' field is set in the 'Send to Messenger' plugin, in the 'data-ref'
-    // The developer can set this to an arbitrary value to associate the 
+    // The developer can set this to an arbitrary value to associate the
     // authentication callback with the 'Send to Messenger' click event. This is
-    // a way to do account linking when the user clicks the 'Send to Messenger' 
+    // a way to do account linking when the user clicks the 'Send to Messenger'
     // plugin.
     var passThroughParam = event.optin.ref;
 
@@ -880,31 +846,6 @@ function verifyRequestSignature(req, res, buf) {
             throw new Error("Couldn't validate the request signature.");
         }
     }
-}
-
-
-function sendEmail(subject, content) {
-    console.log('sending email');
-    var helper = require('sendgrid').mail;
-
-    var from_email = new helper.Email(config.EMAIL_FROM);
-    var to_email = new helper.Email(config.EMAIL_TO);
-    var subject = subject;
-    var content = new helper.Content("text/html", content);
-    var mail = new helper.Mail(from_email, subject, to_email, content);
-
-    var sg = require('sendgrid')(config.SENDGRID_API_KEY);
-    var request = sg.emptyRequest({
-        method: 'POST',
-        path: '/v3/mail/send',
-        body: mail.toJSON()
-    });
-
-    sg.API(request, function(error, response) {
-        console.log(response.statusCode)
-        console.log(response.body)
-        console.log(response.headers)
-    })
 }
 
 function isDefined(obj) {
