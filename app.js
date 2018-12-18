@@ -358,7 +358,7 @@ function handleDialogFlowResponse(sender, response) {
         handleMessages(messages, sender);
     } else if (responseText == '' && !isDefined(action)) {
         //dialogflow could not evaluate input.
-        sendTextMessage(sender, "I'm not sure what you want. Can you be more specific?");
+        sendTextMessage(sender, "Sent to DialogFlow. I'm not sure what you want. Can you be more specific?");
     } else if (isDefined(responseText)) {
         sendTextMessage(sender, responseText);
     }
@@ -751,7 +751,7 @@ function receivedPostback(event) {
     switch (payload) {
         default:
             //unindentified payload
-            sendTextMessage(senderID, "I'm not sure what you want. Can you be more specific?");
+            sendTextMessage(senderID, "Received postback. I'm not sure what you want. Can you be more specific?");
             break;
 
     }
